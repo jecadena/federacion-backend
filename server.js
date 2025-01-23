@@ -31,6 +31,11 @@ db.connect((err) => {
 app.post('/api/federacion', async (req, res) => {
   const { n_federacion, n_country, c_person, p_number, email_address, mobile_number, clave } = req.body;
 
+  // Validación de los campos
+  if (!n_federacion || !n_country || !c_person || !p_number || !email_address || !mobile_number || !clave) {
+    return res.status(400).send('Todos los campos son obligatorios');
+  }
+
   // Verificar si la clave está vacía
   if (!clave) {
     return res.status(400).send('La clave es obligatoria');
@@ -110,6 +115,52 @@ app.post('/api/login', (req, res) => {
   });
 });
 
+// Ruta para obtener los datos de la federación
+app.get('/api/getFederationData', (req, res) => {
+  // Consulta SQL para obtener los datos de la federación
+  const query = 'SELECT * FROM federacion';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error al obtener los datos de la federación:', err);
+      return res.status(500).send('Error al obtener los datos de la federación');
+    }
+
+    // Enviar los resultados como respuesta
+    res.status(200).send(results);
+  });
+});
+
+// Middleware para verificar el token JWT
+function verifyToken(req, res, next) {
+  const token = req.header('Authorization');
+
+  if (!token) {
+    return res.status(403).send('Acceso denegado. No se proporcionó un token.');
+  }
+
+  try {
+    const decoded = jwt.verify(token, 'secreta'); // Verifica el token con la misma clave secreta
+    req.user = decoded; // Almacena los datos del usuario en la solicitud
+    next(); // Continúa con la siguiente función
+  } catch (err) {
+    return res.status(401).send('Token no válido o expirado');
+  }
+}
+
+// Endpoint de logout
+app.post('/api/logout', (req, res) => {
+  // Aquí no necesitamos hacer nada en el servidor si solo invalidamos el token
+  // El cliente debe eliminar el token almacenado (por ejemplo, en localStorage o sessionStorage)
+
+  // Enviar una respuesta de éxito
+  res.status(200).send({ message: 'Logout exitoso' });
+});
+
+// Ejemplo de una ruta protegida por JWT
+app.get('/api/protected', verifyToken, (req, res) => {
+  res.status(200).send(`Hola ${req.user.email_address}, tienes acceso a esta ruta protegida.`);
+});
 
 // Iniciar el servidor
 app.listen(3000, () => {
