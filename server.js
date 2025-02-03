@@ -13,7 +13,7 @@ app.use(bodyParser.json());
 
 // Conexión a la base de datos
 const db = mysql.createConnection({
-  host: 'localhost',
+  host: '127.0.0.1',
   user: 'root',        // Cambia esto por tu usuario de MySQL si es diferente
   password: '',        // Cambia esto si tu base de datos tiene una contraseña
   database: 'federacion',  // Nombre de la base de datos
@@ -29,10 +29,10 @@ db.connect((err) => {
 
 // Método para insertar federación
 app.post('/api/federacion', async (req, res) => {
-  const { n_federacion, n_country, c_person, p_number, email_address, mobile_number, clave } = req.body;
+  const { n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, n_hotel1, n_hotel2, n_hotel3, code_country, clave } = req.body;
 
   // Validación de los campos
-  if (!n_federacion || !n_country || !c_person || !p_number || !email_address || !mobile_number || !clave) {
+  if (!n_federacion || !c_person || !p_number || !email_address || !mobile_number || !clave || !n_address) {
     return res.status(400).send('Todos los campos son obligatorios');
   }
 
@@ -49,13 +49,13 @@ app.post('/api/federacion', async (req, res) => {
 
     // Consulta SQL para insertar los datos en la base de datos
     const query = `
-      INSERT INTO federacion (n_federacion, n_country, c_person, p_number, email_address, mobile_number, clave)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO federacion (n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, n_hotel1, n_hotel2, n_hotel3, code_country, clave)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     db.query(
       query,
-      [n_federacion, n_country, c_person, p_number, email_address, mobile_number, hashedClave],
+      [n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, n_hotel1, n_hotel2, n_hotel3, code_country, hashedClave],
       (err, result) => {
         if (err) {
           console.error('Error al insertar datos:', err);
@@ -80,54 +80,105 @@ app.post('/api/login', (req, res) => {
     return res.status(400).send('El correo y la clave son obligatorios');
   }
 
-  // Consultar el usuario en la base de datos
-  const query = 'SELECT * FROM federacion WHERE email_address = ?';
-  db.query(query, [email_address], async (err, results) => {
+  // Consultar el usuario en la tabla federación
+  const federationQuery = 'SELECT * FROM federacion WHERE email_address = ?';
+  db.query(federationQuery, [email_address], async (err, federationResults) => {
     if (err) {
-      console.error('Error al consultar el usuario:', err);
+      console.error('Error al consultar la tabla federación:', err);
       return res.status(500).send('Error al autenticar el usuario');
     }
 
-    if (results.length === 0) {
-      return res.status(404).send('Usuario no encontrado');
+    if (federationResults.length > 0) {
+      const user = federationResults[0];
+      const match = await bcrypt.compare(clave, user.clave);
+
+      if (!match) {
+        return res.status(401).send('Contraseña incorrecta');
+      }
+
+      // Crear un token JWT para el usuario federado
+      const token = jwt.sign(
+        { id: user.id, email_address: user.email_address, role: 'USER' },
+        'secreta',
+        { expiresIn: '1h' }
+      );
+
+      return res.status(200).send({
+        message: 'Login exitoso',
+        token: token,
+        role: 'USER',
+        data: {
+          id: user.id,
+          n_federacion: user.n_federacion,
+          n_country: user.n_country,
+          p_number: user.p_number,
+          email_address: user.email_address,
+          mobile_number: user.mobile_number,
+        },
+      });
     }
 
-    const user = results[0];
+    // Si no se encuentra en federación, buscar en la tabla usuarios directamente
+    const userQuery = 'SELECT id, de_email, de_password, de_nom_solicitante, de_pat_solicitante, de_fecha FROM usuarios WHERE de_email = ? AND de_password = ?';
+    db.query(userQuery, [email_address, clave], (err, userResults) => {
+      if (err) {
+        console.error('Error al consultar la tabla usuarios:', err);
+        return res.status(500).send('Error al autenticar el usuario');
+      }
 
-    // Comparar la contraseña ingresada con la almacenada
-    const match = await bcrypt.compare(clave, user.clave);
+      if (userResults.length === 0) {
+        return res.status(404).send('Usuario no encontrado');
+      }
 
-    if (!match) {
-      return res.status(401).send('Contraseña incorrecta');
-    }
+      const admin = userResults[0];
 
-    // Crear un token JWT
-    const token = jwt.sign(
-      { id: user.id, email_address: user.email_address },
-      'secreta', // Esta es la clave secreta, cambia por algo más seguro
-      { expiresIn: '1h' } // El token expira en 1 hora
-    );
+      // Crear un token JWT para el usuario administrador
+      const token = jwt.sign(
+        { id: admin.id, email_address: admin.de_email, role: 'ADMIN' },
+        'secreta',
+        { expiresIn: '1h' }
+      );
 
-    res.status(200).send({
-      message: 'Login exitoso',
-      token: token
+      return res.status(200).send({
+        message: 'Login exitoso',
+        token: token,
+        role: 'ADMIN',
+        data: {
+          id: admin.id,
+          email_address: admin.de_email,
+          de_nom_solicitante: admin.de_nom_solicitante,
+          de_pat_solicitante: admin.de_pat_solicitante,
+          de_fecha: admin.de_fecha
+        },
+      });
     });
   });
 });
 
-// Ruta para obtener los datos de la federación
-app.get('/api/getFederationData', (req, res) => {
-  // Consulta SQL para obtener los datos de la federación
-  const query = 'SELECT * FROM federacion';
 
-  db.query(query, (err, results) => {
+// Ruta para obtener los datos de la federación por ID
+app.get('/api/getFederationData/:id', (req, res) => {
+  const federationId = req.params.id;
+
+  // Validar que el ID esté presente
+  if (!federationId) {
+    return res.status(400).send('El ID de la federación es obligatorio');
+  }
+
+  // Consulta SQL para obtener los datos de la federación filtrados por ID
+  const query = 'SELECT * FROM federacion WHERE id = ?';
+
+  db.query(query, [federationId], (err, results) => {
     if (err) {
       console.error('Error al obtener los datos de la federación:', err);
       return res.status(500).send('Error al obtener los datos de la federación');
     }
 
-    // Enviar los resultados como respuesta
-    res.status(200).send(results);
+    if (results.length > 0) {
+      res.status(200).send(results[0]); // Devolver el primer resultado
+    } else {
+      res.status(404).send('No se encontraron datos para el ID proporcionado');
+    }
   });
 });
 
@@ -253,6 +304,34 @@ app.post('/api/checkAndUpdateHotel', (req, res) => {
   });
 });
 
+app.get('/api/hotel/:federationId/:hotelId', (req, res) => {
+  const federationId = req.params.federationId;
+  const hotelId = req.params.hotelId;
+
+  // Validar que ambos parámetros estén presentes
+  if (!federationId || !hotelId) {
+    return res.status(400).send({ message: 'El ID de la federación y del hotel son obligatorios.' });
+  }
+
+  // Consulta para obtener los datos del hotel
+  const query = `SELECT * FROM hoteles WHERE federacion_id = ? AND id = ?`;
+  db.query(query, [federationId, hotelId], (err, results) => {
+    if (err) {
+      console.error('Error al obtener los datos del hotel:', err);
+      return res.status(500).send({ message: 'Error al obtener los datos del hotel.' });
+    }
+
+    if (results.length > 0) {
+      // Si el hotel existe, devolver los datos del hotel
+      res.status(200).send(results[0]);
+    } else {
+      // Si el hotel no existe, devolver un error
+      res.status(404).send({ message: 'El hotel no fue encontrado.' });
+    }
+  });
+});
+
+
 
 // Endpoint para actualizar el registro de un hotel
 app.put('/api/updateHotel', (req, res) => {
@@ -276,6 +355,7 @@ app.put('/api/updateHotel', (req, res) => {
 
 app.get('/api/hotels', (req, res) => {
   const federationId = req.query.federation_id;
+  console.log("ID Federación: ", federationId);
 
   if (!federationId) {
     return res.status(400).json({ error: 'Se requiere un federation_id' });
@@ -294,6 +374,207 @@ app.get('/api/hotels', (req, res) => {
     res.status(200).send(results);
   });
 });
+
+app.get('/api/federations', (req, res) => {
+  const query = 'SELECT * FROM federacion';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error('Error al obtener las federaciones:', err);
+      return res.status(500).send('Error al obtener las federaciones');
+    }
+
+    res.status(200).send(results);
+  });
+});
+
+// Obtener los hoteles de una federación
+app.get('/api/hotels/:id', (req, res) => {
+  const federationId = req.params.id;
+  console.log("FEDERACIÓN: ", federationId);
+  const query = 'SELECT n_federacion, n_hotel1, n_hotel2, n_hotel3 FROM federacion WHERE id = ?';
+
+  db.query(query, [federationId], (err, results) => {
+    if (err) {
+      console.error('Error al obtener los hoteles:', err);
+      return res.status(500).send('Error al obtener los hoteles');
+    }
+
+    res.status(200).send(results);
+  });
+});
+
+app.get('/api/hoteles/:id', (req, res) => {
+  const federationsId = req.params.id;
+  console.log("FEDERACIÓN: ", federationsId);
+  const query = 'SELECT * FROM hoteles WHERE federacion_id = ?';
+
+  db.query(query, [federationsId], (err, results) => {
+    if (err) {
+      console.error('Error al obtener los hoteles:', err);
+      return res.status(500).send('Error al obtener los hoteles');
+    }
+
+    res.status(200).send(results);
+  });
+});
+
+// Listado de Hoteles sin confirmar para cada federación
+app.get('/api/hotelsPreview', (req, res) => {
+  const federationId = req.query.federation_id;
+  const query = `
+    SELECT n_hotel1, n_hotel2, n_hotel3
+    FROM federacion
+    WHERE id = ?
+  `;
+
+  db.query(query, [federationId], (err, results) => {
+    if (err) {
+      console.error('Error al obtener hoteles sin confirmar:', err);
+      return res.status(500).send('Error al obtener los hoteles sin confirmar');
+    }
+
+    // Obtener los hoteles seleccionados
+    const hotels = [
+      results[0]?.n_hotel1,
+      results[0]?.n_hotel2,
+      results[0]?.n_hotel3
+    ].filter((hotel) => hotel);
+
+    res.status(200).send(hotels.map((hotel) => ({ nombre_hotel: hotel })));
+  });
+});
+
+// Obtener los hoteles ya guardados para marcar checkboxes
+app.get('/api/approved-hotels/:id', (req, res) => {
+  const federationId = req.params.id;
+  const query = 'SELECT nombre_hotel FROM hoteles WHERE federacion_id = ?';
+
+  db.query(query, [federationId], (err, results) => {
+    if (err) {
+      console.error('Error al obtener los hoteles aprobados:', err);
+      return res.status(500).send('Error al obtener los hoteles aprobados');
+    }
+
+    res.status(200).send(results.map(h => h.nombre_hotel));
+  });
+});
+
+app.put('/api/datosFederation/:id', (req, res) => {
+  const federationId = req.params.id;
+  const { n_federacion, mobile_number,n_address } = req.body;
+
+  // Verificar que los campos estén presentes
+  if (!n_federacion || !mobile_number || !n_address) {
+    return res.status(400).send('Todos los campos son requeridos.');
+  }
+
+  const query = `
+    UPDATE federacion
+    SET 
+      n_federacion = ?, 
+      mobile_number = ?, 
+      n_address = ?
+    WHERE id = ?
+  `;
+
+  db.query(query, [n_federacion, mobile_number, n_address, federationId], (err, results) => {
+    if (err) {
+      console.error('Error al actualizar la federación:', err);
+      return res.status(500).send('Error al actualizar la federación');
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).send('Federación no encontrada');
+    }
+
+    res.status(200).send('Federación actualizada correctamente');
+  });
+});
+
+// Guardar hoteles seleccionados y eliminar los desmarcados
+app.post('/api/hotels', (req, res) => {
+  const { selectedHotels, federationId } = req.body;
+  const fechaRegistro = new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+  if (!federationId) {
+    return res.status(400).send('Falta el ID de la federación');
+  }
+
+  if (!selectedHotels || selectedHotels.length === 0) {
+    // Si no hay hoteles seleccionados, eliminar todos los hoteles de la federación
+    const deleteAllQuery = 'DELETE FROM hoteles WHERE federacion_id = ?';
+    db.query(deleteAllQuery, [federationId], (err) => {
+      if (err) {
+        console.error('Error eliminando todos los hoteles:', err);
+        return res.status(500).send('Error eliminando todos los hoteles');
+      }
+      return res.status(200).send('Todos los hoteles han sido eliminados');
+    });
+    return;
+  }
+
+  // Obtener hoteles aprobados actuales en la base de datos
+  const queryApprovedHotels = 'SELECT nombre_hotel FROM hoteles WHERE federacion_id = ?';
+
+  db.query(queryApprovedHotels, [federationId], (err, results) => {
+    if (err) {
+      console.error('Error obteniendo hoteles aprobados:', err);
+      return res.status(500).send('Error obteniendo hoteles aprobados');
+    }
+
+    const approvedHotels = results.map(h => h.nombre_hotel);
+
+    // Hoteles a eliminar (desmarcados)
+    const hotelsToDelete = approvedHotels.filter(hotel => !selectedHotels.includes(hotel));
+
+    if (hotelsToDelete.length > 0) {
+      const deleteQuery = 'DELETE FROM hoteles WHERE federacion_id = ? AND nombre_hotel IN (?)';
+      db.query(deleteQuery, [federationId, hotelsToDelete], (err) => {
+        if (err) {
+          console.error('Error eliminando hoteles desmarcados:', err);
+          return res.status(500).send('Error eliminando hoteles desmarcados');
+        }
+      });
+    }
+
+    // Hoteles a insertar (nuevos seleccionados que no están en la BD)
+    const newHotels = selectedHotels.filter(hotel => !approvedHotels.includes(hotel));
+
+    if (newHotels.length === 0) {
+      return res.status(200).send('No se hicieron cambios en la lista de hoteles');
+    }
+
+    // Obtener el último código de hotel
+    const queryLastCode = 'SELECT codigo_hotel FROM hoteles ORDER BY id DESC LIMIT 1';
+
+    db.query(queryLastCode, (err, result) => {
+      if (err) {
+        console.error('Error obteniendo el último código de hotel:', err);
+        return res.status(500).send('Error obteniendo el código de hotel');
+      }
+
+      let lastCode = result.length > 0 ? parseInt(result[0].codigo_hotel.substring(1)) : 0;
+
+      const values = newHotels.map(hotel => {
+        lastCode++;
+        return [`H${lastCode}`, hotel, federationId, fechaRegistro];
+      });
+
+      const queryInsert = 'INSERT INTO hoteles (codigo_hotel, nombre_hotel, federacion_id, f_registro) VALUES ?';
+
+      db.query(queryInsert, [values], (err) => {
+        if (err) {
+          console.error('Error guardando nuevos hoteles:', err);
+          return res.status(500).send('Error guardando nuevos hoteles');
+        }
+
+        res.status(200).send('Hoteles actualizados con éxito');
+      });
+    });
+  });
+});
+
 
 
 // Middleware para verificar el token JWT
@@ -329,5 +610,5 @@ app.get('/api/protected', verifyToken, (req, res) => {
 
 // Iniciar el servidor
 app.listen(3000, () => {
-  console.log('Servidor corriendo en http://localhost:3000');
+  console.log('Servidor corriendo en http://127.0.0.1:3000');
 });
