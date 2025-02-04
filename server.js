@@ -29,7 +29,7 @@ db.connect((err) => {
 
 // Método para insertar federación
 app.post('/api/federacion', async (req, res) => {
-  const { n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, n_hotel1, n_hotel2, n_hotel3, code_country, clave } = req.body;
+  const { n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, code_country, clave } = req.body;
 
   // Validación de los campos
   if (!n_federacion || !c_person || !p_number || !email_address || !mobile_number || !clave || !n_address) {
@@ -49,13 +49,13 @@ app.post('/api/federacion', async (req, res) => {
 
     // Consulta SQL para insertar los datos en la base de datos
     const query = `
-      INSERT INTO federacion (n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, n_hotel1, n_hotel2, n_hotel3, code_country, clave)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO federacion (n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, code_country, clave)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     db.query(
       query,
-      [n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, n_hotel1, n_hotel2, n_hotel3, code_country, hashedClave],
+      [n_federacion, n_country, c_person, p_number, email_address, mobile_number, n_address, code_country, hashedClave],
       (err, result) => {
         if (err) {
           console.error('Error al insertar datos:', err);
@@ -182,35 +182,32 @@ app.get('/api/getFederationData/:id', (req, res) => {
   });
 });
 
-// Endpoint para actualizar los datos de la federación
-app.post('/api/updateFederationData', (req, res) => {
-  const { id, n_federacion, n_country, c_person, p_number, email_address, mobile_number } = req.body;
+// Endpoint para actualizar los datos de la hoteles elegidos por la federación
+app.post('/api/updateFederationHotels', (req, res) => {
+  const { id, n_hotel1, n_hotel2, n_hotel3 } = req.body;
 
   // Validación de los campos requeridos
-  if (!id || !n_federacion || !n_country || !c_person || !p_number || !email_address || !mobile_number) {
-    return res.status(400).send('Todos los campos son obligatorios');
+  if (!id) {
+    return res.status(400).send('Es necesario el id de la Federación');
   }
 
   // Consulta SQL para actualizar los datos de la federación
   const query = `
     UPDATE federacion
     SET 
-      n_federacion = ?, 
-      n_country = ?, 
-      c_person = ?, 
-      p_number = ?, 
-      email_address = ?, 
-      mobile_number = ?
+      n_hotel1 = ?, 
+      n_hotel2 = ?, 
+      n_hotel3 = ?
     WHERE id = ?
   `;
 
   db.query(
     query,
-    [n_federacion, n_country, c_person, p_number, email_address, mobile_number, id],
+    [n_hotel1, n_hotel2, n_hotel3, id],
     (err, result) => {
       if (err) {
-        console.error('Error al actualizar los datos de la federación:', err);
-        return res.status(500).send('Error al actualizar los datos');
+        console.error('Error al actualizar los hoteles de la federación:', err);
+        return res.status(500).send('Error al actualizar los hoteles');
       }
 
       if (result.affectedRows === 0) {
